@@ -59,8 +59,10 @@ async function processPool(pool, balance) {
         const trend = analysis.superTrend.trend;
         const lastPrice = data.at(-1).close;
 
-        // Salva ultima analisi per /log
-        fs.writeFileSync('./logs/last_analysis.json', JSON.stringify({
+        // ✅ Salva ultima analisi per /log
+        if (!fs.existsSync('./logs')) fs.mkdirSync('./logs');
+
+        const lastAnalysis = {
             pool: name,
             timestamp: new Date().toISOString(),
             emaShort: analysis.emaShort,
@@ -68,7 +70,14 @@ async function processPool(pool, balance) {
             rsi: analysis.rsi,
             superTrend: analysis.superTrend,
             entryPrice: analysis.entryPrice
-        }, null, 2));
+        };
+
+        try {
+            fs.writeFileSync('./logs/last_analysis.json', JSON.stringify(lastAnalysis, null, 2));
+            logger.info(`📝 Ultima analisi salvata per ${name}`);
+        } catch (writeErr) {
+            logger.error(`❌ Errore salvataggio analisi: ${writeErr.message}`);
+        }
 
         if (analysis.isBullish && rsi > 55 && trend === 'bullish' && ema50 > ema200 && !entryPrices.has(name)) {
             const amount = calculateDynamicAmount(balance, true);
@@ -123,7 +132,6 @@ function calculateEMA(data, period) {
 setInterval(async () => {
     logger.info('📡 Inizio analisi di tutte le pool...');
 
-    // 🟠 Controlla se il bot è attivo (da .botstate.json)
     if (fs.existsSync(botStatePath)) {
         const botState = JSON.parse(fs.readFileSync(botStatePath, 'utf8'));
         if (!botState.active) {
