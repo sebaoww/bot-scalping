@@ -1,4 +1,5 @@
 const axios = require('axios');
+const fs = require('fs');
 const { analyzePool } = require('./strategy');
 const { executeTrade } = require('./tradeExecutor');
 const { sendTelegramMessage } = require('./notifier');
@@ -9,11 +10,11 @@ const { solana } = require('./config');
 const ANALYSIS_INTERVAL = 5 * 60 * 1000;
 const RAYDIUM_POOLS_URL = 'https://api.raydium.io/v2/main/pairs';
 const entryPrices = new Map();
+const botStatePath = './.botstate.json';
 
 const connection = new Connection(solana.rpcUrl, 'confirmed');
 const wallet = Keypair.fromSecretKey(Uint8Array.from(solana.walletKeypair.secretKey));
 
-// Stato dinamico dell’investimento
 let tradeLevel = 1;
 const maxLevel = 25;
 
@@ -57,6 +58,17 @@ async function processPool(pool, balance) {
         const rsi = analysis.rsi;
         const trend = analysis.superTrend.trend;
         const lastPrice = data.at(-1).close;
+
+        // Salva ultima analisi per /log
+        fs.writeFileSync('./logs/last_analysis.json', JSON.stringify({
+            pool: name,
+            timestamp: new Date().toISOString(),
+            emaShort: analysis.emaShort,
+            emaLong: analysis.emaLong,
+            rsi: analysis.rsi,
+            superTrend: analysis.superTrend,
+            entryPrice: analysis.entryPrice
+        }, null, 2));
 
         if (analysis.isBullish && rsi > 55 && trend === 'bullish' && ema50 > ema200 && !entryPrices.has(name)) {
             const amount = calculateDynamicAmount(balance, true);
@@ -108,9 +120,18 @@ function calculateEMA(data, period) {
     return emaArray;
 }
 
-// Scheduler
 setInterval(async () => {
     logger.info('📡 Inizio analisi di tutte le pool...');
+
+    // 🟠 Controlla se il bot è attivo (da .botstate.json)
+    if (fs.existsSync(botStatePath)) {
+        const botState = JSON.parse(fs.readFileSync(botStatePath, 'utf8'));
+        if (!botState.active) {
+            logger.info('⏸ Bot disattivo, ciclo saltato.');
+            return;
+        }
+    }
+
     const pools = await fetchAllPools();
     const solBalance = await getSolBalance();
 
@@ -125,7 +146,6 @@ setInterval(async () => {
     }
 }, ANALYSIS_INTERVAL);
 
-// Export per il bot Telegram
 module.exports = {
     getSolBalance,
     processPool
