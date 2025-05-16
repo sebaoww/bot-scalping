@@ -46,9 +46,15 @@ async function fetchAllPools() {
 
 async function processPool(pool, balance) {
     const { name, price, volume24h } = pool;
-    if (volume24h < 100 || price <= 0 || !name || price < 0.00001 || price > 100000) {
-        logger.info(`⛔ ${name || 'pool senza nome'} esclusa: condizioni base non valide`);
-        return;
+    if (volume24h < 50 || price <= 0 || !name || price < 0.0000001 || price > 1000000) {
+  if (volume24h < 50) logger.info(`⛔ ${name} esclusa: volume24h troppo basso (${volume24h})`);
+  if (price <= 0) logger.info(`⛔ ${name} esclusa: prezzo non valido (${price})`);
+  if (!name) logger.info(`⛔ Pool esclusa: nessun nome`);
+  if (price < 0.0000001) logger.info(`⛔ ${name} esclusa: prezzo troppo basso (${price})`);
+  if (price > 1000000) logger.info(`⛔ ${name} esclusa: prezzo troppo alto (${price})`);
+  return;
+}
+
     }
 
     try {
