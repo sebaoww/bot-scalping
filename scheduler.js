@@ -11,6 +11,7 @@ const ANALYSIS_INTERVAL = 5 * 60 * 1000;
 const RAYDIUM_POOLS_URL = 'https://api.raydium.io/v2/main/pairs';
 const entryPrices = new Map();
 const botStatePath = './.botstate.json';
+const statsPath = './stats.json';
 
 const connection = new Connection(solana.rpcUrl, 'confirmed');
 const wallet = Keypair.fromSecretKey(Uint8Array.from(solana.walletKeypair.secretKey));
@@ -46,15 +47,15 @@ async function fetchAllPools() {
 
 async function processPool(pool, balance) {
     const { name, price, volume24h } = pool;
-    if (volume24h < 50 || price <= 0 || !name || price < 0.0000001 || price > 1000000) {
-  if (volume24h < 50) logger.info(`⛔ ${name} esclusa: volume24h troppo basso (${volume24h})`);
-  if (price <= 0) logger.info(`⛔ ${name} esclusa: prezzo non valido (${price})`);
-  if (!name) logger.info(`⛔ Pool esclusa: nessun nome`);
-  if (price < 0.0000001) logger.info(`⛔ ${name} esclusa: prezzo troppo basso (${price})`);
-  if (price > 1000000) logger.info(`⛔ ${name} esclusa: prezzo troppo alto (${price})`);
-  return;
-}
 
+    // ✅ Filtri base con log dettagliati
+    if (volume24h < 50 || price <= 0 || !name || price < 0.0000001 || price > 1000000) {
+        if (volume24h < 50) logger.info(`⛔ ${name} esclusa: volume24h troppo basso (${volume24h})`);
+        if (price <= 0) logger.info(`⛔ ${name} esclusa: prezzo non valido (${price})`);
+        if (!name) logger.info(`⛔ Pool esclusa: nessun nome`);
+        if (price < 0.0000001) logger.info(`⛔ ${name} esclusa: prezzo troppo basso (${price})`);
+        if (price > 1000000) logger.info(`⛔ ${name} esclusa: prezzo troppo alto (${price})`);
+        return;
     }
 
     try {
@@ -72,9 +73,8 @@ async function processPool(pool, balance) {
         logger.info(`📈 EMA50: ${ema50.toFixed(6)} | EMA200: ${ema200.toFixed(6)}`);
         logger.info(`📊 RSI: ${rsi.toFixed(2)} | Trend: ${trend} | Ultimo Prezzo: ${lastPrice.toFixed(6)}`);
 
-        // ✅ Salva sempre l'ultima analisi
+        // ✅ Salva ultima analisi per /log
         if (!fs.existsSync('./logs')) fs.mkdirSync('./logs');
-
         const lastAnalysis = {
             pool: name,
             timestamp: new Date().toISOString(),
@@ -84,11 +84,10 @@ async function processPool(pool, balance) {
             superTrend: analysis.superTrend,
             entryPrice: analysis.entryPrice
         };
-
         fs.writeFileSync('./logs/last_analysis.json', JSON.stringify(lastAnalysis, null, 2));
         logger.info(`📝 Ultima analisi salvata per ${name}`);
 
-        // 🔍 Condizioni BUY più flessibili
+        // ✅ Condizioni BUY
         const canBuy =
             analysis.isBullish &&
             rsi > 50 &&
@@ -109,10 +108,18 @@ async function processPool(pool, balance) {
             entryPrices.set(name, lastPrice);
             logger.info(`✅ BUY ${name} @ ${lastPrice.toFixed(6)} per ${amount.toFixed(2)} SOL`);
             await sendTelegramMessage(`📈 *BUY* - Pool: *${name}*\n🔹 Ingresso: ${lastPrice.toFixed(6)} USD\n📦 ${amount.toFixed(2)} SOL`);
+
+            // 🔄 Aggiorna stats
+            if (fs.existsSync(statsPath)) {
+                const stats = JSON.parse(fs.readFileSync(statsPath, 'utf8'));
+                stats.buyCount += 1;
+                fs.writeFileSync(statsPath, JSON.stringify(stats, null, 2));
+            }
+
             executeTrade(analysis, amount, name);
         }
 
-        // 🔍 Condizioni SELL
+        // ✅ Condizioni SELL
         const canSell =
             analysis.isBearish &&
             rsi < 45 &&
@@ -128,6 +135,15 @@ async function processPool(pool, balance) {
 
             logger.info(`✅ SELL ${name} @ ${lastPrice.toFixed(6)} | Profitto: ${gainPercent.toFixed(2)}%`);
             await sendTelegramMessage(`📉 *SELL* - Pool: *${name}*\n🔹 Uscita: ${lastPrice.toFixed(6)} USD\n💰 Profitto: ${gainPercent.toFixed(2)}%\n📦 Prossimo trade: ${amount.toFixed(2)} SOL`);
+
+            // 🔄 Aggiorna stats
+            if (fs.existsSync(statsPath)) {
+                const stats = JSON.parse(fs.readFileSync(statsPath, 'utf8'));
+                stats.sellCount += 1;
+                stats.totalGain += gainPercent;
+                fs.writeFileSync(statsPath, JSON.stringify(stats, null, 2));
+            }
+
             executeTrade(analysis, amount, name);
         }
 
@@ -174,7 +190,7 @@ setInterval(async () => {
     const solBalance = await getSolBalance();
 
     if (pools.length > 0) {
-        const filtered = pools.filter(p => p.volume24h > 100 && p.price > 0).slice(0, 30); // Limita per ridurre memoria
+        const filtered = pools.filter(p => p.volume24h > 0 && p.price > 0).slice(0, 30); // Ottimizzato
         logger.info(`🔍 Pool analizzate: ${filtered.length} su ${pools.length}`);
         for (const pool of filtered) {
             await processPool(pool, solBalance);
