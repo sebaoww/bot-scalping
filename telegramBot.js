@@ -1,10 +1,12 @@
 const { Telegraf } = require('telegraf');
 const fs = require('fs');
+const path = require('path');
 const { getSolBalance } = require('./scheduler');
 const { telegram } = require('./config');
 
 const bot = new Telegraf(telegram.botToken);
 const statePath = './.botstate.json';
+const appLogPath = path.join(__dirname, 'app.log');
 
 // Stato del bot: attivo/disattivo
 let botState = { active: true };
@@ -69,11 +71,12 @@ bot.command('log', async (ctx) => {
   }
 });
 
-// Avvio bot
-bot.launch().then(() => {
-  console.log('🤖 Bot Telegram attivo!');
-}).catch(err => {
-  console.error('❌ Telegram bot già in esecuzione altrove:', err.description || err.message);
-});
+// 🐞 /debug – Mostra gli ultimi 5 log da app.log
+bot.command('debug', async (ctx) => {
+  if (ctx.chat.id !== Number(telegram.chatId)) return;
+  if (fs.existsSync(appLogPath)) {
+    const lines = fs.readFileSync(appLogPath, 'utf8').trim().split('\n');
+    const lastLines = lines.slice(-5).join('\n');
+    ctx.reply(`📋 *Ultimi 5 log:*\n\`\`\`\n${
 
 
