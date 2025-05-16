@@ -1,15 +1,19 @@
 require('dotenv').config();
-const fs = require('fs');
 const { Keypair } = require('@solana/web3.js');
 
-const keypairPath = process.env.WALLET_KEYPAIR_PATH;
-if (!fs.existsSync(keypairPath)) {
-    throw new Error(`❌ Keypair file non trovato: ${keypairPath}`);
-}
+// Estrazione della chiave direttamente da variabile .env
+let walletKeypair;
 
-const keypairRaw = fs.readFileSync(keypairPath, 'utf8');
-const secretKey = Uint8Array.from(JSON.parse(keypairRaw));
-const walletKeypair = Keypair.fromSecretKey(secretKey);
+if (process.env.WALLET_KEYPAIR) {
+  try {
+    const secret = Uint8Array.from(JSON.parse(process.env.WALLET_KEYPAIR));
+    walletKeypair = Keypair.fromSecretKey(secret);
+  } catch (e) {
+    throw new Error('❌ WALLET_KEYPAIR malformato: ' + e.message);
+  }
+} else {
+  throw new Error('❌ Variabile WALLET_KEYPAIR mancante');
+}
 
 module.exports = {
   telegram: {
@@ -18,8 +22,7 @@ module.exports = {
   },
   solana: {
     rpcUrl: process.env.RPC_URL,
-    walletKeypairPath: keypairPath,
-    walletKeypair: walletKeypair,
+    walletKeypair,
   },
   trading: {
     tradeAmountUSD: parseFloat(process.env.TRADE_AMOUNT_USD) || 5,
@@ -40,3 +43,4 @@ module.exports = {
     SUPER_TREND_MULTIPLIER: parseFloat(process.env.SUPER_TREND_MULTIPLIER) || 2,
   }
 };
+
