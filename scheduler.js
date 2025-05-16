@@ -46,10 +46,14 @@ async function fetchAllPools() {
 
 async function processPool(pool, balance) {
     const { name, price, volume24h } = pool;
-    if (volume24h < 100 || price <= 0 || !name || price < 0.00001 || price > 100000) return;
+    if (volume24h < 100 || price <= 0 || !name || price < 0.00001 || price > 100000) {
+        logger.info(`⛔ ${name || 'pool senza nome'} esclusa: condizioni base non valide`);
+        return;
+    }
 
     try {
-        logger.info(`📊 Analisi pool: ${name} - Volume 24h: ${volume24h}`);
+        logger.info(`🔍 Analisi pool: ${name} - Prezzo: ${price} - Volume 24h: ${volume24h}`);
+
         const data = generateSampleData(price);
         const analysis = analyzePool(data);
 
@@ -59,7 +63,10 @@ async function processPool(pool, balance) {
         const trend = analysis.superTrend.trend;
         const lastPrice = data.at(-1).close;
 
-        // ✅ Salva ultima analisi per /log
+        logger.info(`📈 EMA50: ${ema50.toFixed(6)} | EMA200: ${ema200.toFixed(6)}`);
+        logger.info(`📊 RSI: ${rsi.toFixed(2)} | Trend: ${trend} | Ultimo Prezzo: ${lastPrice.toFixed(6)}`);
+
+        // ✅ Salva sempre l'ultima analisi
         if (!fs.existsSync('./logs')) fs.mkdirSync('./logs');
 
         const lastAnalysis = {
@@ -72,38 +79,55 @@ async function processPool(pool, balance) {
             entryPrice: analysis.entryPrice
         };
 
-        try {
-            fs.writeFileSync('./logs/last_analysis.json', JSON.stringify(lastAnalysis, null, 2));
-            logger.info(`📝 Ultima analisi salvata per ${name}`);
-        } catch (writeErr) {
-            logger.error(`❌ Errore salvataggio analisi: ${writeErr.message}`);
+        fs.writeFileSync('./logs/last_analysis.json', JSON.stringify(lastAnalysis, null, 2));
+        logger.info(`📝 Ultima analisi salvata per ${name}`);
+
+        // 🔍 Condizioni BUY più flessibili
+        const canBuy =
+            analysis.isBullish &&
+            rsi > 50 &&
+            (trend === 'bullish' || trend === 'neutral') &&
+            ema50 >= ema200 * 0.95 &&
+            !entryPrices.has(name);
+
+        if (!canBuy) {
+            if (!analysis.isBullish) logger.info(`⛔ Scartata ${name}: no bullish signal`);
+            if (rsi <= 50) logger.info(`⛔ Scartata ${name}: RSI ${rsi.toFixed(2)} troppo basso`);
+            if (trend !== 'bullish' && trend !== 'neutral') logger.info(`⛔ Scartata ${name}: trend ${trend}`);
+            if (ema50 < ema200 * 0.95) logger.info(`⛔ Scartata ${name}: EMA50 < EMA200 (${ema50.toFixed(6)} < ${ema200.toFixed(6)})`);
+            if (entryPrices.has(name)) logger.info(`⛔ Scartata ${name}: già in posizione`);
         }
 
-        if (analysis.isBullish && rsi > 55 && trend === 'bullish' && ema50 > ema200 && !entryPrices.has(name)) {
+        if (canBuy) {
             const amount = calculateDynamicAmount(balance, true);
             entryPrices.set(name, lastPrice);
-            logger.info(`📈 BUY - Pool: ${name}`);
-            logger.info(`🔹 Ingresso: ${lastPrice.toFixed(6)} USD`);
-            logger.info(`📦 Quantità: ${amount.toFixed(2)} SOL`);
+            logger.info(`✅ BUY ${name} @ ${lastPrice.toFixed(6)} per ${amount.toFixed(2)} SOL`);
             await sendTelegramMessage(`📈 *BUY* - Pool: *${name}*\n🔹 Ingresso: ${lastPrice.toFixed(6)} USD\n📦 ${amount.toFixed(2)} SOL`);
             executeTrade(analysis, amount, name);
         }
 
-        if (analysis.isBearish && rsi < 45 && trend === 'bearish' && entryPrices.has(name)) {
+        // 🔍 Condizioni SELL
+        const canSell =
+            analysis.isBearish &&
+            rsi < 45 &&
+            trend === 'bearish' &&
+            entryPrices.has(name);
+
+        if (canSell) {
             const entry = entryPrices.get(name);
             const gainPercent = ((lastPrice - entry) / entry) * 100;
             const lastTradeWasProfit = gainPercent >= 0;
             const amount = calculateDynamicAmount(balance, lastTradeWasProfit);
             entryPrices.delete(name);
-            logger.info(`📉 SELL - Pool: ${name}`);
-            logger.info(`🔹 Uscita: ${lastPrice.toFixed(6)} USD`);
-            logger.info(`💰 Profitto: ${gainPercent.toFixed(2)}%`);
+
+            logger.info(`✅ SELL ${name} @ ${lastPrice.toFixed(6)} | Profitto: ${gainPercent.toFixed(2)}%`);
             await sendTelegramMessage(`📉 *SELL* - Pool: *${name}*\n🔹 Uscita: ${lastPrice.toFixed(6)} USD\n💰 Profitto: ${gainPercent.toFixed(2)}%\n📦 Prossimo trade: ${amount.toFixed(2)} SOL`);
             executeTrade(analysis, amount, name);
         }
 
     } catch (err) {
         logger.error(`❌ Errore nella pool ${name}: ${err.message}`);
+        console.error(err);
     }
 }
 
@@ -144,7 +168,7 @@ setInterval(async () => {
     const solBalance = await getSolBalance();
 
     if (pools.length > 0) {
-        const filtered = pools.filter(p => p.volume24h > 100 && p.price > 0).slice(0, 100);
+        const filtered = pools.filter(p => p.volume24h > 100 && p.price > 0).slice(0, 30); // Limita per ridurre memoria
         logger.info(`🔍 Pool analizzate: ${filtered.length} su ${pools.length}`);
         for (const pool of filtered) {
             await processPool(pool, solBalance);
