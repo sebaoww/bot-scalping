@@ -1,61 +1,75 @@
 const { Telegraf } = require('telegraf');
 const fs = require('fs');
-const { getSolBalance, processPool } = require('./scheduler');
-const { telegram, trading } = require('./config');
+const { getSolBalance } = require('./scheduler');
+const { telegram } = require('./config');
 
 const bot = new Telegraf(telegram.botToken);
-const stateFile = './.botstate.json';
-let isBotActive = false;
+const statePath = './.botstate.json';
 
-// Carica stato
-if (fs.existsSync(stateFile)) {
-    const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
-    isBotActive = state.isBotActive;
+// Stato del bot: attivo/disattivo
+let botState = { active: true };
+
+// Carica stato salvato da file se esiste
+if (fs.existsSync(statePath)) {
+  botState = JSON.parse(fs.readFileSync(statePath, 'utf8'));
 }
 
-bot.use((ctx, next) => {
-    if (ctx.chat.id !== Number(telegram.chatId)) {
-        return ctx.reply('🚫 Non sei autorizzato.');
-    }
-    return next();
-});
-
-bot.command('on', (ctx) => {
-    isBotActive = true;
-    fs.writeFileSync(stateFile, JSON.stringify({ isBotActive }));
-    ctx.reply('✅ Bot attivato.');
-});
-
-bot.command('off', (ctx) => {
-    isBotActive = false;
-    fs.writeFileSync(stateFile, JSON.stringify({ isBotActive }));
-    ctx.reply('🛑 Bot disattivato.');
-});
-
+// 🔄 /status – Mostra lo stato del bot
 bot.command('status', async (ctx) => {
-    const balance = await getSolBalance();
-    ctx.reply(`📊 *Stato Bot:*\n- Attivo: ${isBotActive}\n- Modalità: ${trading.liveMode ? 'LIVE' : 'TEST'}\n- Saldo: ${balance.toFixed(4)} SOL`, { parse_mode: 'Markdown' });
+  if (ctx.chat.id !== Number(telegram.chatId)) return;
+  const balance = await getSolBalance();
+  ctx.reply(`📊 Stato Bot:
+- Attivo: ${botState.active}
+- Modalità: LIVE
+- Saldo: ${balance.toFixed(4)} SOL`);
 });
 
-bot.command('balance', async (ctx) => {
-    const balance = await getSolBalance();
-    ctx.reply(`💰 Saldo attuale: ${balance.toFixed(4)} SOL`);
+// ✅ /on – Attiva il bot
+bot.command('on', async (ctx) => {
+  if (ctx.chat.id !== Number(telegram.chatId)) return;
+  botState.active = true;
+  fs.writeFileSync(statePath, JSON.stringify(botState));
+  ctx.reply('✅ Bot attivato.');
 });
 
-bot.command('testtrade', async (ctx) => {
-    try {
-        ctx.reply('🧪 Eseguo test trade WSOL/MANEKI...');
-        const balance = await getSolBalance();
-        const testPool = {
-            name: 'WSOL/MANEKI',
-            price: 0.004,
-            volume24h: 2000000
-        };
-        await processPool(testPool, balance);
-    } catch (err) {
-        ctx.reply('❌ Errore durante il test trade.');
-    }
+// ⛔ /off – Disattiva il bot
+bot.command('off', async (ctx) => {
+  if (ctx.chat.id !== Number(telegram.chatId)) return;
+  botState.active = false;
+  fs.writeFileSync(statePath, JSON.stringify(botState));
+  ctx.reply('⛔ Bot disattivato manualmente.');
 });
 
+// 🛑 /panic – Alias di /off per stop emergenza
+bot.command('panic', async (ctx) => {
+  if (ctx.chat.id !== Number(telegram.chatId)) return;
+  botState.active = false;
+  fs.writeFileSync(statePath, JSON.stringify(botState));
+  ctx.reply('🛑 PANIC: Bot disattivato immediatamente.');
+});
+
+// 📄 /log – Mostra l’ultima pool analizzata
+bot.command('log', async (ctx) => {
+  if (ctx.chat.id !== Number(telegram.chatId)) return;
+  const logFile = './logs/last_analysis.json';
+  if (!fs.existsSync(logFile)) {
+    return ctx.reply('📭 Nessuna analisi disponibile.');
+  }
+
+  try {
+    const last = JSON.parse(fs.readFileSync(logFile, 'utf8'));
+    ctx.replyWithMarkdown(`📊 *Ultima Analisi* (${last.timestamp})
+*Pool:* ${last.pool}
+📈 EMA: ${last.emaShort.toFixed(6)} / ${last.emaLong.toFixed(6)}
+📊 RSI: ${last.rsi.toFixed(2)}
+🟢 SuperTrend: ${last.superTrend.trend}
+💰 Prezzo: ${last.entryPrice.toFixed(6)} SOL`);
+  } catch (e) {
+    ctx.reply('❌ Errore nel recupero del log.');
+  }
+});
+
+// Avvio bot
 bot.launch();
 console.log('🤖 Bot Telegram attivo!');
+
