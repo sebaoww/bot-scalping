@@ -7,6 +7,7 @@ const { telegram } = require('./config');
 const bot = new Telegraf(telegram.botToken);
 const statePath = './.botstate.json';
 const appLogPath = path.join(__dirname, 'app.log');
+const statsPath = './stats.json';
 
 // Stato del bot: attivo/disattivo
 let botState = { active: true };
@@ -77,6 +78,42 @@ bot.command('debug', async (ctx) => {
   if (fs.existsSync(appLogPath)) {
     const lines = fs.readFileSync(appLogPath, 'utf8').trim().split('\n');
     const lastLines = lines.slice(-5).join('\n');
-    ctx.reply(`📋 *Ultimi 5 log:*\n\`\`\`\n${
+    ctx.reply(`📋 *Ultimi 5 log:*\n\`\`\`\n${lastLines}\n\`\`\``, {
+      parse_mode: 'Markdown'
+    });
+  } else {
+    ctx.reply('❌ Nessun log trovato.');
+  }
+});
 
+// 📊 /stats – Mostra il numero totale di trade
+bot.command('stats', async (ctx) => {
+  if (ctx.chat.id !== Number(telegram.chatId)) return;
+  try {
+    const stats = JSON.parse(fs.readFileSync(statsPath, 'utf8'));
+    ctx.reply(`📊 *Statistiche Bot*
+🟢 Buy totali: ${stats.buyCount}
+🔴 Sell totali: ${stats.sellCount}`, { parse_mode: 'Markdown' });
+  } catch (e) {
+    ctx.reply('❌ Impossibile leggere le statistiche.');
+  }
+});
 
+// 💹 /pnl – Mostra il profitto stimato totale
+bot.command('pnl', async (ctx) => {
+  if (ctx.chat.id !== Number(telegram.chatId)) return;
+  try {
+    const stats = JSON.parse(fs.readFileSync(statsPath, 'utf8'));
+    ctx.reply(`💰 *PNL stimato:*
+📈 Profitto totale: ${stats.totalGain.toFixed(2)} %`, { parse_mode: 'Markdown' });
+  } catch (e) {
+    ctx.reply('❌ Impossibile calcolare il PNL.');
+  }
+});
+
+// 🚀 Avvio bot
+bot.launch().then(() => {
+  console.log('🤖 Bot Telegram attivo!');
+}).catch(err => {
+  console.error('❌ Telegram bot già in esecuzione altrove:', err.description || err.message);
+});
