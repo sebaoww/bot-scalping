@@ -70,6 +70,10 @@ bot.command('log', async (ctx) => {
 });
 
 // Avvio bot
-bot.launch();
-console.log('🤖 Bot Telegram attivo!');
+bot.launch().then(() => {
+  console.log('🤖 Bot Telegram attivo!');
+}).catch(err => {
+  console.error('❌ Telegram bot già in esecuzione altrove:', err.description || err.message);
+});
+
 
