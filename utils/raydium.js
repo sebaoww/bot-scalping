@@ -1,41 +1,29 @@
 // utils/raydium.js
 
-const { getSwapRoute, getSwapInstructions } = require('@raydium-io/raydium-sdk');
-const { PublicKey } = require('@solana/web3.js');
+const { Jupiter, RouteMap } = require('@jup-ag/core');
+const { Connection } = require('@solana/web3.js');
 
-/**
- * Costruisce l'istruzione di swap tra WSOL e un token target su Raydium
- * @param {Object} params
- * @param {Connection} params.connection
- * @param {Keypair} params.wallet
- * @param {PublicKey} params.inputMint
- * @param {PublicKey} params.outputMint
- * @param {number} params.amountIn - Ammontare in lamports (1e9 = 1 SOL)
- * @returns {Promise<TransactionInstruction>}
- */
-async function getSwapIx({ connection, wallet, inputMint, outputMint, amountIn }) {
-    try {
-        const route = await getSwapRoute({
-            inputMint,
-            outputMint,
-            amountIn,
-            slippage: 0.5
-        });
+async function getSwapIx({ connection, wallet, inputMint, outputMint, amountIn, slippage }) {
+  const jupiter = await Jupiter.load({
+    connection,
+    cluster: 'mainnet-beta',
+    user: wallet
+  });
 
-        if (!route || !route.length) throw new Error('Percorso di swap non trovato.');
+  const routes = await jupiter.computeRoutes({
+    inputMint,
+    outputMint,
+    amount: amountIn,
+    slippage
+  });
 
-        const { instructions } = await getSwapInstructions({
-            connection,
-            wallet,
-            routeInfo: route[0]
-        });
+  const bestRoute = routes?.routes?.[0];
+  if (!bestRoute) throw new Error('Nessuna route disponibile');
 
-        return instructions[0];
-    } catch (err) {
-        throw new Error(`Errore creazione istruzione swap: ${err.message}`);
-    }
+  const { transactions } = await jupiter.exchange({ routeInfo: bestRoute });
+  return transactions.swapTransaction; // singola istruzione
 }
 
 module.exports = {
-    getSwapIx
+  getSwapIx
 };
