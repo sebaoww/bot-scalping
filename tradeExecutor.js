@@ -9,15 +9,24 @@ const connection = new Connection(solana.rpcUrl, 'confirmed');
 const wallet = Keypair.fromSecretKey(Uint8Array.from(solana.walletKeypair.secretKey));
 const WSOL = new PublicKey('So11111111111111111111111111111111111111112');
 
-async function getMintFromPool(poolName) {
+async function getMintsFromRaydium(poolName) {
     try {
         const [tokenA, tokenB] = poolName.split('/');
-        const tokenToFetch = tokenA === 'WSOL' ? tokenB : tokenA;
-        const response = await axios.get('https://token.jup.ag/all');
-        const tokenInfo = response.data.find(t => t.symbol.toUpperCase() === tokenToFetch.toUpperCase());
-        return tokenInfo ? new PublicKey(tokenInfo.address) : null;
+        const response = await axios.get('https://api.raydium.io/v2/main/pairs');
+
+        const pool = response.data.find(p =>
+            (p.baseSymbol === tokenA && p.quoteSymbol === tokenB) ||
+            (p.baseSymbol === tokenB && p.quoteSymbol === tokenA)
+        );
+
+        if (!pool) return null;
+
+        const inputMint = tokenA === 'WSOL' ? new PublicKey(pool.quoteMint) : new PublicKey(pool.baseMint);
+        const outputMint = tokenA === 'WSOL' ? new PublicKey(pool.baseMint) : new PublicKey(pool.quoteMint);
+
+        return { inputMint, outputMint };
     } catch (err) {
-        logger.error(`❌ Errore nel fetch mint per ${poolName}: ${err.message}`);
+        logger.error(`❌ Errore nel fetch mint da Raydium: ${err.message}`);
         return null;
     }
 }
@@ -25,14 +34,16 @@ async function getMintFromPool(poolName) {
 async function executeTrade(analysis, amountSOL, poolName) {
     try {
         const action = analysis.isBullish ? 'BUY' : 'SELL';
-        const inputIsWSOL = action === 'BUY';
-        const inputMint = inputIsWSOL ? WSOL : await getMintFromPool(poolName);
-        const outputMint = inputIsWSOL ? await getMintFromPool(poolName) : WSOL;
+        const mintInfo = await getMintsFromRaydium(poolName);
 
-        if (!inputMint || !outputMint) {
-            logger.warn(`⚠️ Mint non trovato per pool ${poolName}`);
+        if (!mintInfo) {
+            logger.warn(`⚠️ Mints non trovati per la pool ${poolName}`);
             return;
         }
+
+        const { inputMint, outputMint } = action === 'BUY'
+            ? { inputMint: WSOL, outputMint: mintInfo.outputMint }
+            : { inputMint: mintInfo.outputMint, outputMint: WSOL };
 
         const swapIx = await getSwapIx({
             connection,
@@ -60,6 +71,7 @@ async function executeTrade(analysis, amountSOL, poolName) {
             mintOut: outputMint.toBase58(),
             signature
         });
+
     } catch (err) {
         logger.error(`❌ Errore esecuzione trade su ${poolName}: ${err.message}`);
     }
