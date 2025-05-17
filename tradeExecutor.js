@@ -8,6 +8,20 @@ const logger = require('./logger');
 const connection = new Connection(solana.rpcUrl, 'confirmed');
 const wallet = Keypair.fromSecretKey(Uint8Array.from(solana.walletKeypair.secretKey));
 const WSOL = new PublicKey('So11111111111111111111111111111111111111112');
+const entryFilePath = './logs/entry_prices.json';
+
+function loadEntryPrices() {
+    if (!fs.existsSync(entryFilePath)) return {};
+    try {
+        return JSON.parse(fs.readFileSync(entryFilePath, 'utf8'));
+    } catch {
+        return {};
+    }
+}
+
+function saveEntryPrices(entryPrices) {
+    fs.writeFileSync(entryFilePath, JSON.stringify(entryPrices, null, 2));
+}
 
 async function getMintsFromRaydium(poolName) {
     try {
@@ -26,9 +40,14 @@ async function getMintsFromRaydium(poolName) {
 
         return { inputMint, outputMint };
     } catch (err) {
-        logger.error(`❌ Errore nel fetch mint da Raydium: ${err.message}`);
+        logger.error(`❌ Errore fetch mint: ${err.message}`);
         return null;
     }
+}
+
+async function getSolBalance() {
+    const lamports = await connection.getBalance(wallet.publicKey);
+    return lamports / 1e9;
 }
 
 async function executeTrade(analysis, amountSOL, poolName) {
@@ -38,6 +57,13 @@ async function executeTrade(analysis, amountSOL, poolName) {
 
         if (!mintInfo) {
             logger.warn(`⚠️ Mints non trovati per la pool ${poolName}`);
+            return;
+        }
+
+        const balance = await getSolBalance();
+        const minRequired = amountSOL + 0.003;
+        if (balance < minRequired) {
+            logger.warn(`⚠️ Saldo insufficiente: ${balance.toFixed(4)} < ${minRequired}`);
             return;
         }
 
@@ -54,15 +80,30 @@ async function executeTrade(analysis, amountSOL, poolName) {
             slippage: trading.slippage
         });
 
+        if (!swapIx) {
+            logger.warn(`⚠️ Nessuna istruzione di swap per ${poolName}`);
+            return;
+        }
+
         const tx = new Transaction().add(swapIx);
         const signature = await connection.sendTransaction(tx, [wallet]);
         await connection.confirmTransaction(signature, 'confirmed');
 
-        const message = `✅ *${action}* eseguito su *${poolName}*\n🔁 ${amountSOL} SOL\n🔗 https://solscan.io/tx/${signature}`;
-        logger.info(message);
-        await sendTelegramMessage(message);
+        const msg = `✅ *${action}* eseguito su *${poolName}*\n🔁 ${amountSOL} SOL\n🔗 https://solscan.io/tx/${signature}`;
+        logger.info(msg);
+        await sendTelegramMessage(msg);
 
-        logTrade({
+        // Aggiorna entryPrice se BUY
+        const entryPrices = loadEntryPrices();
+        if (action === 'BUY') {
+            entryPrices[poolName] = analysis.entryPrice;
+        } else if (action === 'SELL') {
+            delete entryPrices[poolName];
+        }
+        saveEntryPrices(entryPrices);
+
+        // Log file
+        const tradeLog = {
             time: new Date().toISOString(),
             action,
             pool: poolName,
@@ -70,17 +111,17 @@ async function executeTrade(analysis, amountSOL, poolName) {
             mintIn: inputMint.toBase58(),
             mintOut: outputMint.toBase58(),
             signature
-        });
+        };
+        fs.appendFileSync('./logs/trading_logs.json', JSON.stringify(tradeLog, null, 2) + ',\n');
 
     } catch (err) {
-        logger.error(`❌ Errore esecuzione trade su ${poolName}: ${err.message}`);
+        logger.error(`❌ Errore trade ${poolName}: ${err.message}`);
     }
 }
 
 async function sendTelegramMessage(message) {
-    const url = `https://api.telegram.org/bot${telegram.botToken}/sendMessage`;
     try {
-        await axios.post(url, {
+        await axios.post(`https://api.telegram.org/bot${telegram.botToken}/sendMessage`, {
             chat_id: telegram.chatId,
             text: message,
             parse_mode: 'Markdown'
@@ -88,12 +129,6 @@ async function sendTelegramMessage(message) {
     } catch (err) {
         logger.error(`❌ Errore Telegram: ${err.message}`);
     }
-}
-
-function logTrade(entry) {
-    const path = './logs/trading_logs.json';
-    const content = JSON.stringify(entry, null, 2) + ',\n';
-    fs.appendFileSync(path, content);
 }
 
 module.exports = {
