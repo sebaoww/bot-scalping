@@ -14,17 +14,17 @@ async function getMintFromPool(poolName) {
         const [tokenA, tokenB] = poolName.split('/');
         const tokenToFetch = tokenA === 'WSOL' ? tokenB : tokenA;
         const response = await axios.get('https://token.jup.ag/all');
-        const tokenInfo = response.data.find(t => t.symbol === tokenToFetch);
+        const tokenInfo = response.data.find(t => t.symbol.toUpperCase() === tokenToFetch.toUpperCase());
         return tokenInfo ? new PublicKey(tokenInfo.address) : null;
     } catch (err) {
-        logger.error(`Errore nel fetch mint per ${poolName}: ${err.message}`);
+        logger.error(`❌ Errore nel fetch mint per ${poolName}: ${err.message}`);
         return null;
     }
 }
 
-async function executeTrade(signal, amountSOL, poolName) {
+async function executeTrade(analysis, amountSOL, poolName) {
     try {
-        const action = signal.isBullish ? 'BUY' : 'SELL';
+        const action = analysis.isBullish ? 'BUY' : 'SELL';
         const inputIsWSOL = action === 'BUY';
         const inputMint = inputIsWSOL ? WSOL : await getMintFromPool(poolName);
         const outputMint = inputIsWSOL ? await getMintFromPool(poolName) : WSOL;
@@ -61,7 +61,7 @@ async function executeTrade(signal, amountSOL, poolName) {
             signature
         });
     } catch (err) {
-        logger.error(`❌ Errore esecuzione trade: ${err.message}`);
+        logger.error(`❌ Errore esecuzione trade su ${poolName}: ${err.message}`);
     }
 }
 
@@ -74,7 +74,7 @@ async function sendTelegramMessage(message) {
             parse_mode: 'Markdown'
         });
     } catch (err) {
-        logger.error(`Errore Telegram: ${err.message}`);
+        logger.error(`❌ Errore Telegram: ${err.message}`);
     }
 }
 
