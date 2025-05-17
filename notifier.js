@@ -1,17 +1,19 @@
-// notifier.js
-const { Telegraf } = require('telegraf');
-const config = require('./config');
+const axios = require('axios');
+const { telegram } = require('./config');
+const logger = require('./logger');
 
-const bot = new Telegraf(config.telegram.botToken);
-
-async function sendTelegramMessage(text) {
-    try {
-        await bot.telegram.sendMessage(config.telegram.chatId, text, {
-            parse_mode: 'Markdown',
-        });
-    } catch (err) {
-        console.error('❌ Errore Telegram:', err.message);
-    }
+async function sendTelegramMessage(message) {
+  try {
+    await axios.post(`https://api.telegram.org/bot${telegram.botToken}/sendMessage`, {
+      chat_id: telegram.chatId,
+      text: message,
+      parse_mode: 'Markdown'
+    });
+  } catch (err) {
+    logger.error(`❌ Errore invio Telegram: ${err.message}`);
+  }
 }
 
-module.exports = { sendTelegramMessage };
+module.exports = {
+  sendTelegramMessage
+};
